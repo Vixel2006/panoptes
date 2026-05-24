@@ -1,4 +1,4 @@
-# contributing to optic
+# contributing to apnoptes
 
 you want to add features? cool. but don't make a mess.
 
