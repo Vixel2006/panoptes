@@ -1,4 +1,4 @@
-# contributing to apnoptes
+# contributing to panoptes
 
 you want to add features? cool. but don't make a mess.
 
