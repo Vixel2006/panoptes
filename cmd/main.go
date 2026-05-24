@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Vixel2006/panoptes/internal/adapters"
+	"github.com/Vixel2006/panoptes/internal/infra/transport"
 )
 
 func main() {
-	server := adapter.NewServer("localhost", "8080")
+	adapter := adapter.NewInterceptAdapter()
+	server := transport.NewServer("localhost", 8080, adapter.HandleConn)
+	ctx := context.Background()
 
-	server.Connect(context.Background())
+	server.Start(ctx)
 }

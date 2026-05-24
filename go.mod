@@ -1,3 +1,3 @@
-module github.com/vixel2006/penoptes
+module github.com/Vixel2006/panoptes
 
 go 1.23
