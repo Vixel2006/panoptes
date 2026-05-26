@@ -1,11 +1,10 @@
 package port
 
 import (
-	"context"
-
-	"github.com/Vixel2006/panoptes/internal/core/models"
+	"net/http"
 )
 
 type InterceptorPort interface {
-	Intercept(ctx context.Context, req *model.Request) (*model.Response, error)
+	InterceptRequest(req *http.Request) error
+	InterceptResponse(resp *http.Response) error
 }
