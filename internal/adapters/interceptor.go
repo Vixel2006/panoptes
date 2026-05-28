@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"crypto/tls"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/Vixel2006/panoptes/internal/adapters/repo"
 	"github.com/Vixel2006/panoptes/internal/core/models"
 	"github.com/Vixel2006/panoptes/internal/core/services"
+	"github.com/Vixel2006/panoptes/internal/infra/db"
 
 	cert "github.com/Vixel2006/panoptes/internal/infra/tls"
 )
@@ -20,6 +23,7 @@ type InterceptAdapter struct {
 	barrier     *service.Barrier
 	interceptor *service.Interceptor
 	requestCh   chan model.Request
+	database    *db.DB
 }
 
 type bufferedConn struct {
@@ -31,12 +35,28 @@ func (bc *bufferedConn) Read(b []byte) (int, error) { return bc.r.Read(b) }
 
 func NewInterceptAdapter(certGen *cert.CertificateGenerator) *InterceptAdapter {
 	requestCh := make(chan model.Request, 100)
-	interceptor := service.NewInterceptor(requestCh)
+
+	database, err := db.Open("panoptes.db")
+	if err != nil {
+		log.Fatalf("failed to open database: %v", err)
+	}
+
+	reqRepo := repo.NewRequestRepository(database.DB)
+	respRepo := repo.NewResponseRepository(database.DB)
+	interceptor := service.NewInterceptor(requestCh, reqRepo, respRepo)
 	return &InterceptAdapter{
 		certGen:     certGen,
 		barrier:     service.NewBarrier(),
 		interceptor: interceptor,
 		requestCh:   requestCh,
+		database:    database,
+	}
+}
+
+func (a *InterceptAdapter) Close() {
+	a.interceptor.Stop()
+	if a.database != nil {
+		a.database.Close()
 	}
 }
 

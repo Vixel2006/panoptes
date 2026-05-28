@@ -51,6 +51,11 @@ func (b *Barrier) SetActive(active bool) {
 		case b.hold <- true:
 		default:
 		}
+	} else {
+		select {
+		case <-b.hold:
+		default:
+		}
 	}
 	b.Mutex.Unlock()
 }
