@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	adapter "github.com/Vixel2006/panoptes/internal/adapters"
+	"github.com/Vixel2006/panoptes/internal/core/services"
 	"github.com/Vixel2006/panoptes/internal/infra/tls"
 	"github.com/Vixel2006/panoptes/internal/infra/transport"
 )
@@ -37,7 +38,10 @@ func main() {
 	server := transport.NewServer("localhost", 8080, a.HandleConn)
 	ctx := context.Background()
 
-	fmt.Printf("Proxy listening on localhost:8080\n")
+	go func() {
+		log.Printf("Proxy listening on localhost:8080")
+		server.Start(ctx)
+	}()
 
-	server.Start(ctx)
+	service.StartPrinter(a.Barrier(), a.RequestCh())
 }

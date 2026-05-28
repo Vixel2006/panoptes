@@ -12,64 +12,78 @@ import (
 )
 
 type Interceptor struct {
-	// Here we add the repo ports
+	requestCh chan<- model.Request
 }
 
-func NewInterceptor() *Interceptor {
-	return &Interceptor{}
+func NewInterceptor(requestCh chan<- model.Request) *Interceptor {
+	return &Interceptor{
+		requestCh: requestCh,
+	}
 }
 
-func (i *Interceptor) InterceptRequest(req *http.Request) error {
-	rawBody, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+func (i *Interceptor) InterceptRequest(r *http.Request) error {
+	rawBody, _ := io.ReadAll(r.Body)
+	r.Body.Close()
 
-	headerJSON, _ := json.Marshal(req.Header)
+	r.Body = io.NopCloser(bytes.NewReader(rawBody))
+	r.ContentLength = int64(len(rawBody))
+	r.Header.Del("Transfer-Encoding")
 
-	dbReq := model.Request{
+	headerJSON, _ := json.Marshal(r.Header)
+
+	req := model.Request{
 		ID:      uuid.New().String(),
-		URL:     req.URL.String(),
-		Method:  req.Method,
+		URL:     r.URL.String(),
+		Method:  r.Method,
 		Header:  json.RawMessage(headerJSON),
 		Payload: json.RawMessage(rawBody),
-		Length:  req.ContentLength,
+		Length:  r.ContentLength,
 
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 
-		ParsedURL: req.URL,
-		Host:      req.Host,
-		Headers:   req.Header,
+		ParsedURL: r.URL,
+		Host:      r.Host,
+		Headers:   r.Header,
 		Body:      io.NopCloser(bytes.NewReader(rawBody)),
 		RawBody:   rawBody,
 	}
 
-	_ = dbReq
-	// TODO: persist dbReq and push to TUI
+	if i.requestCh != nil {
+		select {
+		case i.requestCh <- req:
+		default:
+		}
+	}
 
 	return nil
 }
 
-func (i *Interceptor) InterceptResponse(resp *http.Response) error {
-	rawBody, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+func (i *Interceptor) InterceptResponse(r *http.Response) error {
+	rawBody, _ := io.ReadAll(r.Body)
+	r.Body.Close()
 
-	headerJSON, _ := json.Marshal(resp.Header)
+	r.Body = io.NopCloser(bytes.NewReader(rawBody))
+	r.ContentLength = int64(len(rawBody))
+	r.Header.Del("Transfer-Encoding")
 
-	dbResp := model.Response{
+	headerJSON, _ := json.Marshal(r.Header)
+
+	resp := model.Response{
 		ID:         uuid.New().String(),
-		Status:     resp.Status,
-		StatusCode: resp.StatusCode,
+		Status:     r.Status,
+		StatusCode: r.StatusCode,
 		Header:     json.RawMessage(headerJSON),
 		Payload:    json.RawMessage(rawBody),
 
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 
-		Headers: resp.Header,
+		Headers: r.Header,
 		Body:    io.NopCloser(bytes.NewReader(rawBody)),
 	}
 
-	_ = dbResp
+	_ = resp
 	// TODO: persist dbResp and push to TUI
 
 	return nil
