@@ -1,7 +1,8 @@
-package db
+package repo
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -9,14 +10,17 @@ import (
 )
 
 type RequestRepository struct {
-	db *DB
+	db *sql.DB
+}
+
+func NewRequestRepository(db *sql.DB) *RequestRepository {
+	return &RequestRepository{db: db}
 }
 
 func (r *RequestRepository) Create(ctx context.Context, req *model.Request) error {
-	headerStr := string(req.Header)
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO requests (id, url, method, header, payload, length, group_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.ID, req.URL, req.Method, headerStr, []byte(req.Payload), req.Length, nullStr(req.GroupID), timeToText(req.CreatedAt), timeToText(req.UpdatedAt),
+		req.ID, req.URL, req.Method, string(req.Header), []byte(req.Payload), req.Length, nullStr(req.GroupID), timeToText(req.CreatedAt), timeToText(req.UpdatedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)

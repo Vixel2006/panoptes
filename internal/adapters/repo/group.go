@@ -1,14 +1,19 @@
-package db
+package repo
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/Vixel2006/panoptes/internal/core/models"
 )
 
 type GroupRepository struct {
-	db *DB
+	db *sql.DB
+}
+
+func NewGroupRepository(db *sql.DB) *GroupRepository {
+	return &GroupRepository{db: db}
 }
 
 func (r *GroupRepository) Create(ctx context.Context, g *model.Group) error {

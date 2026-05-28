@@ -1,7 +1,8 @@
-package db
+package repo
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -9,14 +10,17 @@ import (
 )
 
 type ResponseRepository struct {
-	db *DB
+	db *sql.DB
+}
+
+func NewResponseRepository(db *sql.DB) *ResponseRepository {
+	return &ResponseRepository{db: db}
 }
 
 func (r *ResponseRepository) Create(ctx context.Context, resp *model.Response) error {
-	headerStr := string(resp.Header)
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO responses (id, status, status_code, header, payload, length, request_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		resp.ID, resp.Status, resp.StatusCode, headerStr, []byte(resp.Payload), resp.Length, resp.RequestID, timeToText(resp.CreatedAt), timeToText(resp.UpdatedAt),
+		resp.ID, resp.Status, resp.StatusCode, string(resp.Header), []byte(resp.Payload), resp.Length, resp.RequestID, timeToText(resp.CreatedAt), timeToText(resp.UpdatedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("create response: %w", err)

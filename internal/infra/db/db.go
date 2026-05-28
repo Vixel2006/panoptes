@@ -9,11 +9,6 @@ import (
 
 type DB struct {
 	*sql.DB
-	Sessions  *SessionRepository
-	Groups    *GroupRepository
-	Requests  *RequestRepository
-	Responses *ResponseRepository
-	Notes     *NoteRepository
 }
 
 func Open(path string) (*DB, error) {
@@ -31,12 +26,6 @@ func Open(path string) (*DB, error) {
 	if err := d.migrate(); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-
-	d.Sessions = &SessionRepository{db: d}
-	d.Groups = &GroupRepository{db: d}
-	d.Requests = &RequestRepository{db: d}
-	d.Responses = &ResponseRepository{db: d}
-	d.Notes = &NoteRepository{db: d}
 
 	return d, nil
 }

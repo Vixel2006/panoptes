@@ -1,14 +1,19 @@
-package db
+package repo
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/Vixel2006/panoptes/internal/core/models"
 )
 
 type SessionRepository struct {
-	db *DB
+	db *sql.DB
+}
+
+func NewSessionRepository(db *sql.DB) *SessionRepository {
+	return &SessionRepository{db: db}
 }
 
 func (r *SessionRepository) Create(ctx context.Context, s *model.Session) error {

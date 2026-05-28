@@ -1,7 +1,6 @@
-package db
+package repo
 
 import (
-	"database/sql"
 	"time"
 )
 
@@ -20,11 +19,4 @@ func nullStr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func strPtr(s sql.NullString) string {
-	if s.Valid {
-		return s.String
-	}
-	return ""
 }
