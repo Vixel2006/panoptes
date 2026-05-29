@@ -18,8 +18,8 @@ func NewGroupRepository(db *sql.DB) *GroupRepository {
 
 func (r *GroupRepository) Create(ctx context.Context, g *model.Group) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO groups (id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		g.ID, g.SessionID, timeToText(g.CreatedAt), timeToText(g.UpdatedAt),
+		`INSERT INTO groups (id, session_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		g.ID, g.SessionID, g.Name, timeToText(g.CreatedAt), timeToText(g.UpdatedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("create group: %w", err)
@@ -29,11 +29,11 @@ func (r *GroupRepository) Create(ctx context.Context, g *model.Group) error {
 
 func (r *GroupRepository) GetByID(ctx context.Context, id string) (*model.Group, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, session_id, created_at, updated_at FROM groups WHERE id = ?`, id,
+		`SELECT id, session_id, name, created_at, updated_at FROM groups WHERE id = ?`, id,
 	)
 	g := &model.Group{}
 	var createdAt, updatedAt string
-	if err := row.Scan(&g.ID, &g.SessionID, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&g.ID, &g.SessionID, &g.Name, &createdAt, &updatedAt); err != nil {
 		return nil, fmt.Errorf("get group: %w", err)
 	}
 	g.CreatedAt, _ = textToTime(createdAt)
@@ -43,7 +43,7 @@ func (r *GroupRepository) GetByID(ctx context.Context, id string) (*model.Group,
 
 func (r *GroupRepository) ListBySession(ctx context.Context, sessionID string) ([]*model.Group, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, session_id, created_at, updated_at FROM groups WHERE session_id = ? ORDER BY created_at ASC`,
+		`SELECT id, session_id, name, created_at, updated_at FROM groups WHERE session_id = ? ORDER BY created_at ASC`,
 		sessionID,
 	)
 	if err != nil {
@@ -55,7 +55,7 @@ func (r *GroupRepository) ListBySession(ctx context.Context, sessionID string) (
 	for rows.Next() {
 		g := &model.Group{}
 		var createdAt, updatedAt string
-		if err := rows.Scan(&g.ID, &g.SessionID, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&g.ID, &g.SessionID, &g.Name, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan group: %w", err)
 		}
 		g.CreatedAt, _ = textToTime(createdAt)

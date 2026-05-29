@@ -15,7 +15,7 @@ func TestGroupCreateAndGet(t *testing.T) {
 	gr := repo.NewGroupRepository(db)
 
 	sr.Create(ctx, &model.Session{ID: "sess-1", Name: "s", CreatedAt: time.Now(), UpdatedAt: time.Now()})
-	g := &model.Group{ID: "grp-1", SessionID: "sess-1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	g := &model.Group{ID: "grp-1", SessionID: "sess-1", Name: "g1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 
 	if err := gr.Create(ctx, g); err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func TestGroupCreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != "grp-1" || got.SessionID != "sess-1" {
+	if got.ID != "grp-1" || got.SessionID != "sess-1" || got.Name != "g1" {
 		t.Errorf("got %+v", got)
 	}
 }
@@ -36,8 +36,8 @@ func TestGroupListBySession(t *testing.T) {
 	gr := repo.NewGroupRepository(db)
 
 	sr.Create(ctx, &model.Session{ID: "sess-1", Name: "s", CreatedAt: time.Now(), UpdatedAt: time.Now()})
-	gr.Create(ctx, &model.Group{ID: "g1", SessionID: "sess-1", CreatedAt: time.Now(), UpdatedAt: time.Now()})
-	gr.Create(ctx, &model.Group{ID: "g2", SessionID: "sess-1", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	gr.Create(ctx, &model.Group{ID: "g1", SessionID: "sess-1", Name: "g1", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	gr.Create(ctx, &model.Group{ID: "g2", SessionID: "sess-1", Name: "g2", CreatedAt: time.Now(), UpdatedAt: time.Now()})
 
 	groups, err := gr.ListBySession(ctx, "sess-1")
 	if err != nil {
@@ -54,7 +54,7 @@ func TestGroupDelete(t *testing.T) {
 	gr := repo.NewGroupRepository(db)
 
 	sr.Create(ctx, &model.Session{ID: "sess-1", Name: "s", CreatedAt: time.Now(), UpdatedAt: time.Now()})
-	gr.Create(ctx, &model.Group{ID: "g1", SessionID: "sess-1", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	gr.Create(ctx, &model.Group{ID: "g1", SessionID: "sess-1", Name: "g1", CreatedAt: time.Now(), UpdatedAt: time.Now()})
 
 	gr.Delete(ctx, "g1")
 
@@ -70,7 +70,7 @@ func TestGroupDeleteCascadesFromSession(t *testing.T) {
 	gr := repo.NewGroupRepository(db)
 
 	sr.Create(ctx, &model.Session{ID: "sess-1", Name: "s", CreatedAt: time.Now(), UpdatedAt: time.Now()})
-	gr.Create(ctx, &model.Group{ID: "g1", SessionID: "sess-1", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	gr.Create(ctx, &model.Group{ID: "g1", SessionID: "sess-1", Name: "g1", CreatedAt: time.Now(), UpdatedAt: time.Now()})
 
 	sr.Delete(ctx, "sess-1")
 

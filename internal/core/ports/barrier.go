@@ -5,4 +5,5 @@ type BarrierPort interface {
 	Unlock()
 	Decision() bool
 	Release(forward bool)
+	SetActive(active bool)
 }

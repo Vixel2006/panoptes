@@ -71,7 +71,8 @@ Browser                     Proxy                          Upstream
    │  ~~ TLS established ~~   │                               │
    │                          │                               │
    ├──GET / (encrypted)──────►│                               │
-   │                          │  Decrypt → InterceptRequest   │
+   │                          │  Decrypt → build model.Request│
+   │                          │  → interceptor.InterceptReq   │
    │                          │  → barrier.Lock() → wait      │
    │                          │  → TUI prints → Release()     │
    │                          │  → RoundTrip over TLS         │
@@ -168,8 +169,8 @@ Browser                     Proxy                          Upstream
    │                          │
    │  ~~ Normal intercept ~~  │
    ├──GET / (inner encrypt)──►│
-   │                          │  → interceptRequest → barrier
-   │                          │  → RoundTrip over TLS
+   │                          │  → buildRequest → interceptor
+   │                          │  → barrier → RoundTrip
    │                          ├──────────GET /───────────────►
    │◄─────────response────────┤◄─────────response────────────┤
 ```
@@ -225,8 +226,12 @@ func (i *InterceptAdapter) handleTLS(conn net.Conn, br *bufio.Reader) {
         }
 
         // Regular HTTP over outer TLS
+        modelReq := i.buildRequest(req)
+        i.interceptor.InterceptRequest(modelReq)
+        i.barrier.Lock()
+        forward := i.barrier.Decision()
+        i.barrier.Unlock()
         ...
-        i.handleInterceptedHTTP(outer, req)
     }
 }
 ```
@@ -258,21 +263,35 @@ func (i *InterceptAdapter) handleHTTP(conn net.Conn, br *bufio.Reader) {
         req.URL.Host = req.Host
     }
 
-    i.interceptor.InterceptRequest(req)
+    modelReq := i.buildRequest(req)
+    i.interceptor.InterceptRequest(modelReq)
     i.barrier.Lock()
     forward := i.barrier.Decision()
     i.barrier.Unlock()
 
     if !forward {
-        // Send 403 Forbidden
-        ...
+        dropResp := &http.Response{
+            StatusCode: http.StatusForbidden,
+            ProtoMajor: 1, ProtoMinor: 1,
+        }
+        dropResp.Write(conn)
         return
     }
 
     transport := &http.Transport{Proxy: nil}
     upstreamResp, err := transport.RoundTrip(req)
-    ...
-    i.interceptor.InterceptResponse(upstreamResp)
+    if err != nil {
+        errResp := &http.Response{
+            StatusCode: http.StatusBadGateway,
+            ProtoMajor: 1, ProtoMinor: 1,
+        }
+        errResp.Write(conn)
+        return
+    }
+    defer upstreamResp.Body.Close()
+
+    modelResp := i.buildResponse(upstreamResp)
+    i.interceptor.InterceptResponse(modelResp)
     upstreamResp.Write(conn)
 }
 ```
@@ -297,7 +316,9 @@ func (i *InterceptAdapter) interceptTLS(tlsConn net.Conn, host string) {
         req.URL = &url.URL{Scheme: "https", Host: host, Path: req.RequestURI}
         req.RequestURI = ""
 
-        i.interceptor.InterceptRequest(req)
+        modelReq := i.buildRequest(req)
+        i.interceptor.InterceptRequest(modelReq)
+
         i.barrier.Lock()
         forward := i.barrier.Decision()
         i.barrier.Unlock()
@@ -320,7 +341,8 @@ func (i *InterceptAdapter) interceptTLS(tlsConn net.Conn, host string) {
             errResp.Write(tlsConn)
             continue
         }
-        i.interceptor.InterceptResponse(upstreamResp)
+        modelResp := i.buildResponse(upstreamResp)
+        i.interceptor.InterceptResponse(modelResp)
         upstreamResp.Write(tlsConn)
         upstreamResp.Body.Close()
     }
@@ -331,14 +353,12 @@ The loop handles HTTP/1.1 keep-alive: multiple requests can flow over the same T
 
 ---
 
-## The Interceptor + Barrier (Request Control)
+## Request/Response Building
 
-The `Interceptor` and `Barrier` together implement the "ack" mechanism — pausing and approving each request.
-
-### `Interceptor.InterceptRequest`
+The adapter is responsible for translating between HTTP types and domain models. It reads the body, decompresses it, marshals headers to JSON, and creates `model.Request` / `model.Response` objects.
 
 ```go
-func (i *Interceptor) InterceptRequest(r *http.Request) error {
+func (i *InterceptAdapter) buildRequest(r *http.Request) model.Request {
     rawBody, _ := io.ReadAll(r.Body)
     r.Body.Close()
 
@@ -347,12 +367,52 @@ func (i *Interceptor) InterceptRequest(r *http.Request) error {
     r.ContentLength = int64(len(rawBody))
     r.Header.Del("Transfer-Encoding")
 
-    // Snapshot to model (sent to TUI via channel)
-    req := model.Request{ ... }
-    select {
-    case i.requestCh <- req:
-    default: // drop if TUI is backed up
+    // Decompress for storage
+    storedBody, _ := i.decompressor.Decompress(r.Header.Get("Content-Encoding"), rawBody)
+    headerJSON, _ := json.Marshal(r.Header)
+
+    return model.Request{
+        ID:      i.idGen.New(),
+        URL:     r.URL.String(),
+        Method:  r.Method,
+        Header:  json.RawMessage(headerJSON),
+        Payload: json.RawMessage(storedBody),
+        Length:  r.ContentLength,
     }
+}
+```
+
+Same pattern for `buildResponse`.
+
+---
+
+## The Interceptor + Barrier (Request Control)
+
+The `Interceptor` (app layer) and `Barrier` (core service) together implement the capture and control mechanism.
+
+### `Interceptor.InterceptRequest`
+
+The interceptor receives a fully-formed `model.Request` (already built by the adapter). It timestamps it, tags it with the active session ID, pushes it to the TUI channel, and queues it for async persistence.
+
+```go
+func (i *Interceptor) InterceptRequest(req model.Request) error {
+    req.CreatedAt = time.Now()
+    req.UpdatedAt = time.Now()
+    req.SessionID = i.GetActiveSessionID()
+
+    select {
+    case i.persistReqCh <- req:     // async persistence
+    default:                        // drop if worker is backed up
+    }
+
+    if i.requestCh != nil {
+        select {
+        case i.requestCh <- req:    // TUI channel
+        default:
+        }
+    }
+
+    i.lastReqID = req.ID
     return nil
 }
 ```
@@ -377,11 +437,11 @@ func (b *Barrier) Release(forward bool) {
 ```
 
 The flow:
-1. Proxy calls `InterceptRequest` → sends snapshot to TUI channel
-2. Proxy calls `barrier.Lock()` → blocks on `<-b.hold`
-3. TUI receives from request channel, prints request, calls `Release(true/false)`
+1. Adapter calls `buildRequest` → sends snapshot to interceptor
+2. Adapter calls `barrier.Lock()` → blocks on `<-b.hold`
+3. TUI shows the request, user decides forward or drop via `Release(true/false)`
 4. Barrier sends decision to `b.hold` channel
-5. Proxy wakes up, reads decision, forwards or drops
+5. Adapter wakes up, reads decision, forwards or drops
 
 ---
 
@@ -401,10 +461,10 @@ Transfer-Encoding: chunked
 
 The browser tries to dechunk the dechunked data → corruption → `PR_END_OF_FILE_ERROR`.
 
-**Fix** in `InterceptResponse`:
+**Fix** in `buildResponse`:
 
 ```go
-func (i *Interceptor) InterceptResponse(r *http.Response) error {
+func (i *InterceptAdapter) buildResponse(r *http.Response) model.Response {
     rawBody, _ := io.ReadAll(r.Body)
     r.Body.Close()
 
@@ -413,11 +473,11 @@ func (i *Interceptor) InterceptResponse(r *http.Response) error {
     r.Header.Del("Transfer-Encoding")
 
     // ... snapshot to model ...
-    return nil
+    return model.Response{...}
 }
 ```
 
-Same fix applies to `InterceptRequest` for outgoing bodies.
+Same fix applies to `buildRequest` for outgoing bodies.
 
 ---
 
@@ -451,11 +511,13 @@ Same fix applies to `InterceptRequest` for outgoing bodies.
                     │   interceptTLS    │
                     │  OR handleHTTP    │
                     │                   │
-                    │  InterceptRequest │
+                    │  buildRequest     │
+                    │  → InterceptReq   │
                     │  → barrier.Lock() │
                     │  → TUI prints     │
                     │  → Release()      │
                     │  → RoundTrip()    │
+                    │  → buildResponse  │
                     │  → InterceptResp  │
                     │  → Write(client)  │
                     └───────────────────┘

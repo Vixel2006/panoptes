@@ -10,6 +10,7 @@ import (
 
 func TestBarrierBlocksUntilRelease(t *testing.T) {
 	b := service.NewBarrier()
+	b.SetActive(true)
 
 	started := make(chan struct{})
 	unblocked := make(chan struct{})
@@ -35,6 +36,7 @@ func TestBarrierBlocksUntilRelease(t *testing.T) {
 
 func TestBarrierReturnsReleasedDecision(t *testing.T) {
 	b := service.NewBarrier()
+	b.SetActive(true)
 
 	var wg sync.WaitGroup
 	wg.Add(1)

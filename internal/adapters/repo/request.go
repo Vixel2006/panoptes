@@ -19,8 +19,8 @@ func NewRequestRepository(db *sql.DB) *RequestRepository {
 
 func (r *RequestRepository) Create(ctx context.Context, req *model.Request) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO requests (id, url, method, header, payload, length, group_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.ID, req.URL, req.Method, string(req.Header), []byte(req.Payload), req.Length, nullStr(req.GroupID), timeToText(req.CreatedAt), timeToText(req.UpdatedAt),
+		`INSERT INTO requests (id, url, method, header, payload, length, group_id, session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.ID, req.URL, req.Method, string(req.Header), []byte(req.Payload), req.Length, nullStr(req.GroupID), nullStr(req.SessionID), timeToText(req.CreatedAt), timeToText(req.UpdatedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -30,18 +30,39 @@ func (r *RequestRepository) Create(ctx context.Context, req *model.Request) erro
 
 func (r *RequestRepository) GetByID(ctx context.Context, id string) (*model.Request, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, url, method, header, payload, length, group_id, created_at, updated_at FROM requests WHERE id = ?`, id,
+		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests WHERE id = ?`, id,
 	)
 	return scanRequest(row)
 }
 
 func (r *RequestRepository) ListByGroup(ctx context.Context, groupID string) ([]*model.Request, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, url, method, header, payload, length, group_id, created_at, updated_at FROM requests WHERE group_id = ? ORDER BY created_at ASC`,
+		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests WHERE group_id = ? ORDER BY created_at ASC`,
 		groupID,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list requests: %w", err)
+		return nil, fmt.Errorf("list requests by group: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*model.Request
+	for rows.Next() {
+		req, err := scanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, req)
+	}
+	return out, rows.Err()
+}
+
+func (r *RequestRepository) ListBySession(ctx context.Context, sessionID string) ([]*model.Request, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests WHERE session_id = ? ORDER BY created_at ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list requests by session: %w", err)
 	}
 	defer rows.Close()
 
@@ -58,7 +79,7 @@ func (r *RequestRepository) ListByGroup(ctx context.Context, groupID string) ([]
 
 func (r *RequestRepository) ListAll(ctx context.Context) ([]*model.Request, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, url, method, header, payload, length, group_id, created_at, updated_at FROM requests ORDER BY created_at DESC`,
+		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests ORDER BY created_at ASC`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list all requests: %w", err)
@@ -102,8 +123,8 @@ func scanRequest(row scannable) (*model.Request, error) {
 	req := &model.Request{}
 	var headerStr, createdAt, updatedAt string
 	var payload []byte
-	var groupID *string
-	if err := row.Scan(&req.ID, &req.URL, &req.Method, &headerStr, &payload, &req.Length, &groupID, &createdAt, &updatedAt); err != nil {
+	var groupID, sessionID *string
+	if err := row.Scan(&req.ID, &req.URL, &req.Method, &headerStr, &payload, &req.Length, &groupID, &sessionID, &createdAt, &updatedAt); err != nil {
 		return nil, fmt.Errorf("scan request: %w", err)
 	}
 	req.Header = json.RawMessage(headerStr)
@@ -112,6 +133,9 @@ func scanRequest(row scannable) (*model.Request, error) {
 	}
 	if groupID != nil {
 		req.GroupID = *groupID
+	}
+	if sessionID != nil {
+		req.SessionID = *sessionID
 	}
 	req.CreatedAt, _ = textToTime(createdAt)
 	req.UpdatedAt, _ = textToTime(updatedAt)

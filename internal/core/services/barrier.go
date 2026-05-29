@@ -14,7 +14,7 @@ type Barrier struct {
 
 func NewBarrier() *Barrier {
 	return &Barrier{
-		active:   true,
+		active:   false,
 		hold:     make(chan bool, 1),
 		decision: true,
 	}

@@ -2,28 +2,28 @@ package adapter
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
 
-	"github.com/Vixel2006/panoptes/internal/adapters/repo"
 	"github.com/Vixel2006/panoptes/internal/core/models"
-	"github.com/Vixel2006/panoptes/internal/core/services"
-	"github.com/Vixel2006/panoptes/internal/infra/db"
+	"github.com/Vixel2006/panoptes/internal/core/ports"
 
 	cert "github.com/Vixel2006/panoptes/internal/infra/tls"
 )
 
 type InterceptAdapter struct {
 	certGen     *cert.CertificateGenerator
-	barrier     *service.Barrier
-	interceptor *service.Interceptor
+	barrier     port.BarrierPort
+	interceptor port.InterceptorPort
+	decompressor port.Decompressor
+	idGen       port.IDGenerator
 	requestCh   chan model.Request
-	database    *db.DB
 }
 
 type bufferedConn struct {
@@ -33,39 +33,80 @@ type bufferedConn struct {
 
 func (bc *bufferedConn) Read(b []byte) (int, error) { return bc.r.Read(b) }
 
-func NewInterceptAdapter(certGen *cert.CertificateGenerator) *InterceptAdapter {
-	requestCh := make(chan model.Request, 100)
-
-	database, err := db.Open("panoptes.db")
-	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
-	}
-
-	reqRepo := repo.NewRequestRepository(database.DB)
-	respRepo := repo.NewResponseRepository(database.DB)
-	interceptor := service.NewInterceptor(requestCh, reqRepo, respRepo)
+func NewInterceptAdapter(
+	certGen *cert.CertificateGenerator,
+	barrier port.BarrierPort,
+	interceptor port.InterceptorPort,
+	decompressor port.Decompressor,
+	idGen port.IDGenerator,
+	requestCh chan model.Request,
+) *InterceptAdapter {
 	return &InterceptAdapter{
-		certGen:     certGen,
-		barrier:     service.NewBarrier(),
-		interceptor: interceptor,
-		requestCh:   requestCh,
-		database:    database,
+		certGen:      certGen,
+		barrier:      barrier,
+		interceptor:  interceptor,
+		decompressor: decompressor,
+		idGen:        idGen,
+		requestCh:    requestCh,
 	}
 }
 
 func (a *InterceptAdapter) Close() {
 	a.interceptor.Stop()
-	if a.database != nil {
-		a.database.Close()
-	}
 }
 
-func (i *InterceptAdapter) Barrier() *service.Barrier {
+func (i *InterceptAdapter) Barrier() port.BarrierPort {
 	return i.barrier
+}
+
+func (i *InterceptAdapter) Interceptor() port.InterceptorPort {
+	return i.interceptor
 }
 
 func (i *InterceptAdapter) RequestCh() <-chan model.Request {
 	return i.requestCh
+}
+
+func (i *InterceptAdapter) buildRequest(r *http.Request) model.Request {
+	rawBody, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+
+	r.Body = io.NopCloser(bytes.NewReader(rawBody))
+	r.ContentLength = int64(len(rawBody))
+	r.Header.Del("Transfer-Encoding")
+
+	storedBody, _ := i.decompressor.Decompress(r.Header.Get("Content-Encoding"), rawBody)
+	headerJSON, _ := json.Marshal(r.Header)
+
+	return model.Request{
+		ID:      i.idGen.New(),
+		URL:     r.URL.String(),
+		Method:  r.Method,
+		Header:  json.RawMessage(headerJSON),
+		Payload: json.RawMessage(storedBody),
+		Length:  r.ContentLength,
+	}
+}
+
+func (i *InterceptAdapter) buildResponse(r *http.Response) model.Response {
+	rawBody, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+
+	r.Body = io.NopCloser(bytes.NewReader(rawBody))
+	r.ContentLength = int64(len(rawBody))
+	r.Header.Del("Transfer-Encoding")
+
+	storedBody, _ := i.decompressor.Decompress(r.Header.Get("Content-Encoding"), rawBody)
+	headerJSON, _ := json.Marshal(r.Header)
+
+	return model.Response{
+		ID:         i.idGen.New(),
+		Status:     r.Status,
+		StatusCode: r.StatusCode,
+		Header:     json.RawMessage(headerJSON),
+		Payload:    json.RawMessage(storedBody),
+		Length:     r.ContentLength,
+	}
 }
 
 func (i *InterceptAdapter) HandleConn(conn net.Conn) {
@@ -177,7 +218,8 @@ func (i *InterceptAdapter) handleTLS(conn net.Conn, br *bufio.Reader) {
 			req.URL.Host = req.Host
 		}
 
-		i.interceptor.InterceptRequest(req)
+		modelReq := i.buildRequest(req)
+		i.interceptor.InterceptRequest(modelReq)
 		i.barrier.Lock()
 		forward := i.barrier.Decision()
 		i.barrier.Unlock()
@@ -203,7 +245,8 @@ func (i *InterceptAdapter) handleTLS(conn net.Conn, br *bufio.Reader) {
 			errResp.Write(outer)
 			continue
 		}
-		i.interceptor.InterceptResponse(upstreamResp)
+		modelResp := i.buildResponse(upstreamResp)
+		i.interceptor.InterceptResponse(modelResp)
 		upstreamResp.Write(outer)
 		upstreamResp.Body.Close()
 	}
@@ -222,7 +265,8 @@ func (i *InterceptAdapter) interceptTLS(tlsConn net.Conn, host string) {
 		req.URL = &url.URL{Scheme: "https", Host: host, Path: req.RequestURI}
 		req.RequestURI = ""
 
-		i.interceptor.InterceptRequest(req)
+		modelReq := i.buildRequest(req)
+		i.interceptor.InterceptRequest(modelReq)
 
 		i.barrier.Lock()
 		forward := i.barrier.Decision()
@@ -248,7 +292,8 @@ func (i *InterceptAdapter) interceptTLS(tlsConn net.Conn, host string) {
 			errResp.Write(tlsConn)
 			continue
 		}
-		i.interceptor.InterceptResponse(upstreamResp)
+		modelResp := i.buildResponse(upstreamResp)
+		i.interceptor.InterceptResponse(modelResp)
 		upstreamResp.Write(tlsConn)
 		upstreamResp.Body.Close()
 	}
@@ -265,7 +310,8 @@ func (i *InterceptAdapter) handleHTTP(conn net.Conn, br *bufio.Reader) {
 		req.URL.Host = req.Host
 	}
 
-	i.interceptor.InterceptRequest(req)
+	modelReq := i.buildRequest(req)
+	i.interceptor.InterceptRequest(modelReq)
 
 	i.barrier.Lock()
 	forward := i.barrier.Decision()
@@ -294,6 +340,7 @@ func (i *InterceptAdapter) handleHTTP(conn net.Conn, br *bufio.Reader) {
 	}
 	defer upstreamResp.Body.Close()
 
-	i.interceptor.InterceptResponse(upstreamResp)
+	modelResp := i.buildResponse(upstreamResp)
+	i.interceptor.InterceptResponse(modelResp)
 	upstreamResp.Write(conn)
 }

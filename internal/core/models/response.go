@@ -2,8 +2,6 @@ package model
 
 import (
 	"encoding/json"
-	"io"
-	"net/http"
 	"time"
 )
 
@@ -18,9 +16,4 @@ type Response struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-
-	// Runtime fields — not serialised to JSON / not stored in DB.
-	Headers http.Header   `json:"-"`
-	Body    io.ReadCloser `json:"-"`
-	RawBody []byte        `json:"-"`
 }

@@ -2,14 +2,11 @@ package service_test
 
 import (
 	"context"
-	"io"
-	"net/http"
-	"strings"
 	"sync"
 	"testing"
 
+	"github.com/Vixel2006/panoptes/internal/app"
 	"github.com/Vixel2006/panoptes/internal/core/models"
-	"github.com/Vixel2006/panoptes/internal/core/services"
 )
 
 type mockRequestPersister struct {
@@ -55,18 +52,17 @@ func (m *mockResponsePersister) Responses() []model.Response {
 func TestInterceptRequest(t *testing.T) {
 	reqPersist := &mockRequestPersister{}
 	respPersist := &mockResponsePersister{}
-	ic := service.NewInterceptor(nil, reqPersist, respPersist)
+	ic := app.NewInterceptor(nil, reqPersist, respPersist)
 	defer ic.Stop()
 
-	body := `{"key": "value"}`
-	httpReq, err := http.NewRequest("POST", "http://example.com/foo?q=1", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
+	modelReq := model.Request{
+		ID:     "req-1",
+		URL:    "http://example.com/foo?q=1",
+		Method: "POST",
+		Length: 16,
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-Custom", "test")
 
-	if err := ic.InterceptRequest(httpReq); err != nil {
+	if err := ic.InterceptRequest(modelReq); err != nil {
 		t.Fatal(err)
 	}
 	ic.Stop()
@@ -83,12 +79,6 @@ func TestInterceptRequest(t *testing.T) {
 	if p.Method != "POST" {
 		t.Errorf("Method = %q, want %q", p.Method, "POST")
 	}
-	if p.ID == "" {
-		t.Error("ID is empty")
-	}
-	if p.Length != int64(len(body)) {
-		t.Errorf("Length = %d, want %d", p.Length, len(body))
-	}
 	if p.CreatedAt.IsZero() {
 		t.Error("CreatedAt is zero")
 	}
@@ -97,26 +87,20 @@ func TestInterceptRequest(t *testing.T) {
 func TestInterceptResponseLinksToLastRequest(t *testing.T) {
 	reqPersist := &mockRequestPersister{}
 	respPersist := &mockResponsePersister{}
-	ic := service.NewInterceptor(nil, reqPersist, respPersist)
+	ic := app.NewInterceptor(nil, reqPersist, respPersist)
 	defer ic.Stop()
 
-	httpReq, _ := http.NewRequest("GET", "http://example.com/", http.NoBody)
-	ic.InterceptRequest(httpReq)
+	ic.InterceptRequest(model.Request{ID: "req-1", URL: "http://example.com/", Method: "GET"})
 	ic.Stop()
 
-	ic2 := service.NewInterceptor(nil, reqPersist, respPersist)
+	ic2 := app.NewInterceptor(nil, reqPersist, respPersist)
 	defer ic2.Stop()
-	// Set lastReqID by calling InterceptRequest
-	httpReq2, _ := http.NewRequest("GET", "http://example.com/", http.NoBody)
-	ic2.InterceptRequest(httpReq2)
+	ic2.InterceptRequest(model.Request{ID: "req-2", URL: "http://example.com/", Method: "GET"})
 
-	httpResp := &http.Response{
+	ic2.InterceptResponse(model.Response{
 		StatusCode: 200,
 		Status:     "200 OK",
-		Body:       io.NopCloser(strings.NewReader(`{"ok": true}`)),
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-	}
-	ic2.InterceptResponse(httpResp)
+	})
 	ic2.Stop()
 
 	persistedResps := respPersist.Responses()
@@ -127,15 +111,17 @@ func TestInterceptResponseLinksToLastRequest(t *testing.T) {
 	if persistedResps[0].StatusCode != 200 {
 		t.Errorf("StatusCode = %d, want 200", persistedResps[0].StatusCode)
 	}
+	if persistedResps[0].RequestID != "req-2" {
+		t.Errorf("RequestID = %q, want req-2", persistedResps[0].RequestID)
+	}
 }
 
 func TestInterceptRequestChannel(t *testing.T) {
 	ch := make(chan model.Request, 1)
-	ic := service.NewInterceptor(ch, nil, nil)
+	ic := app.NewInterceptor(ch, nil, nil)
 	defer ic.Stop()
 
-	httpReq, _ := http.NewRequest("GET", "http://example.com/", http.NoBody)
-	ic.InterceptRequest(httpReq)
+	ic.InterceptRequest(model.Request{ID: "req-1", URL: "http://example.com/", Method: "GET"})
 
 	select {
 	case req := <-ch:
@@ -150,15 +136,13 @@ func TestInterceptRequestChannel(t *testing.T) {
 func TestInterceptResponseNoPanicWithoutPriorRequest(t *testing.T) {
 	reqPersist := &mockRequestPersister{}
 	respPersist := &mockResponsePersister{}
-	ic := service.NewInterceptor(nil, reqPersist, respPersist)
+	ic := app.NewInterceptor(nil, reqPersist, respPersist)
 	defer ic.Stop()
 
-	httpResp := &http.Response{
+	ic.InterceptResponse(model.Response{
 		StatusCode: 404,
 		Status:     "404 Not Found",
-		Body:       io.NopCloser(strings.NewReader("not found")),
-	}
-	ic.InterceptResponse(httpResp)
+	})
 	ic.Stop()
 
 	persisted := respPersist.Responses()
@@ -170,11 +154,14 @@ func TestInterceptResponseNoPanicWithoutPriorRequest(t *testing.T) {
 func TestInterceptorStopDrainsEvents(t *testing.T) {
 	reqPersist := &mockRequestPersister{}
 	respPersist := &mockResponsePersister{}
-	ic := service.NewInterceptor(nil, reqPersist, respPersist)
+	ic := app.NewInterceptor(nil, reqPersist, respPersist)
 
 	for i := 0; i < 5; i++ {
-		req, _ := http.NewRequest("GET", "http://example.com/", http.NoBody)
-		ic.InterceptRequest(req)
+		ic.InterceptRequest(model.Request{
+			ID:     "",
+			URL:    "http://example.com/",
+			Method: "GET",
+		})
 	}
 	ic.Stop()
 
