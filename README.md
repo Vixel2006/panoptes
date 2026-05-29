@@ -1,4 +1,4 @@
-# penoptes
+# panoptes
 
 a high-performance, open-source intercepting proxy for the security community.
 
