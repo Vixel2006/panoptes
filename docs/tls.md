@@ -51,6 +51,8 @@ chrome uses the system certificate store on all platforms. install it with the O
 
 ### windows
 
+why in hell would you use windows for hacking (or anything else). anyway here's the way to add the certificate in windows suggested by ai as I don't use windows (thank god for this).
+
 ```powershell
 certutil -addstore Root certs\panoptes-ca.crt
 ```

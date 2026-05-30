@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -95,7 +96,8 @@ func main() {
 	interceptor := app.NewInterceptor(requestCh, reqRepo, respRepo)
 	barrier := service.NewBarrier()
 
-	a := adapter.NewInterceptAdapter(certGen, barrier, interceptor, decompressor, idGen, requestCh)
+	forwarder := &http.Transport{}
+	a := adapter.NewInterceptAdapter(certGen, barrier, interceptor, decompressor, idGen, forwarder, requestCh)
 
 	server := transport.NewServer("localhost", 8080, a.HandleConn)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -103,22 +105,26 @@ func main() {
 
 	go func() {
 		log.Printf("Proxy listening on localhost:8080")
-		server.Start(ctx)
+		if err := server.Start(ctx); err != nil {
+			log.Printf("Server error: %v", err)
+		}
 	}()
 
 	sessions := app.NewSessionManager(repo.NewSessionRepository(database.DB), idGen)
-	groups := app.NewGroupManager(repo.NewGroupRepository(database.DB), idGen)
-	notes := app.NewNoteManager(repo.NewNoteRepository(database.DB), idGen)
+	groupRepo := repo.NewGroupRepository(database.DB)
+	noteRepo := repo.NewNoteRepository(database.DB)
 
 	cfg := ui.Config{
 		Barrier:            a.Barrier(),
 		Interceptor:        a.Interceptor(),
 		RequestCh:          a.RequestCh(),
 		Sessions:           sessions,
-		Groups:             groups,
-		Notes:              notes,
 		ReqRepo:            reqRepo,
 		RespRepo:           respRepo,
+		GroupRepo:          groupRepo,
+		NoteRepo:           noteRepo,
+		IDGen:              idGen,
+		Decompressor:       decompressor,
 		InitialSessionName: sessionName,
 	}
 

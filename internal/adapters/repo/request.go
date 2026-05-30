@@ -37,7 +37,7 @@ func (r *RequestRepository) GetByID(ctx context.Context, id string) (*model.Requ
 
 func (r *RequestRepository) ListByGroup(ctx context.Context, groupID string) ([]*model.Request, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests WHERE group_id = ? ORDER BY created_at ASC`,
+		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests WHERE group_id = ? ORDER BY created_at DESC`,
 		groupID,
 	)
 	if err != nil {
@@ -58,7 +58,7 @@ func (r *RequestRepository) ListByGroup(ctx context.Context, groupID string) ([]
 
 func (r *RequestRepository) ListBySession(ctx context.Context, sessionID string) ([]*model.Request, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests WHERE session_id = ? ORDER BY created_at ASC`,
+		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests WHERE session_id = ? ORDER BY created_at DESC`,
 		sessionID,
 	)
 	if err != nil {
@@ -79,7 +79,7 @@ func (r *RequestRepository) ListBySession(ctx context.Context, sessionID string)
 
 func (r *RequestRepository) ListAll(ctx context.Context) ([]*model.Request, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests ORDER BY created_at ASC`,
+		`SELECT id, url, method, header, payload, length, group_id, session_id, created_at, updated_at FROM requests ORDER BY created_at DESC`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list all requests: %w", err)

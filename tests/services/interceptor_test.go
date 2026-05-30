@@ -100,7 +100,7 @@ func TestInterceptResponseLinksToLastRequest(t *testing.T) {
 	ic2.InterceptResponse(model.Response{
 		StatusCode: 200,
 		Status:     "200 OK",
-	})
+	}, "req-2")
 	ic2.Stop()
 
 	persistedResps := respPersist.Responses()
@@ -142,7 +142,7 @@ func TestInterceptResponseNoPanicWithoutPriorRequest(t *testing.T) {
 	ic.InterceptResponse(model.Response{
 		StatusCode: 404,
 		Status:     "404 Not Found",
-	})
+	}, "")
 	ic.Stop()
 
 	persisted := respPersist.Responses()

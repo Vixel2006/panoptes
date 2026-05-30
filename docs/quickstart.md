@@ -1,6 +1,6 @@
 # quickstart
 
-five minutes. no java. go brr.
+five minutes. no java.
 
 ## install
 
@@ -21,8 +21,12 @@ sudo cp certs/panoptes-ca.crt /usr/local/share/ca-certificates/ && sudo update-c
 # macos
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain certs/panoptes-ca.crt
 
+# windows
+# why would you use window bro. just install linux or buy a macbook
+
 # firefox (manual)
 # Preferences → Privacy & Security → Certificates → View Certificates → Authorities → Import → pick certs/panoptes-ca.crt
+
 ```
 
 now point your browser proxy to **localhost:8080**.

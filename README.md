@@ -62,6 +62,8 @@ penoptes uses a clean **hexagonal architecture** (ports and adapters). the core 
 | **sessions** | organise your work into named sessions, switch between them |
 | **filter** | search captured traffic by url, method, status code, body text |
 | **intruder** (planned) | concurrent wordlist fuzzer (workers pull from a channel, go fast) |
+| **js scripting** (planned) | extensions in javascript — hook requests/responses, build custom workflows, automate in-editor transforms |
+| **js extension marketplace** (planned) | extension marketplace to share and install community scripts |
 
 ## contributing
 

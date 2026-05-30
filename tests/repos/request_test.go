@@ -138,11 +138,11 @@ func TestRequestListBySession(t *testing.T) {
 	if len(sess1Reqs) != 2 {
 		t.Fatalf("expected 2 requests for sess-1, got %d", len(sess1Reqs))
 	}
-	if sess1Reqs[0].ID != "r1" {
-		t.Errorf("expected first request for sess-1 to be r1, got %s", sess1Reqs[0].ID)
+	if sess1Reqs[0].ID != "r2" {
+		t.Errorf("expected first (newest) request for sess-1 to be r2, got %s", sess1Reqs[0].ID)
 	}
-	if sess1Reqs[1].ID != "r2" {
-		t.Errorf("expected second request for sess-1 to be r2, got %s", sess1Reqs[1].ID)
+	if sess1Reqs[1].ID != "r1" {
+		t.Errorf("expected second request for sess-1 to be r1, got %s", sess1Reqs[1].ID)
 	}
 
 	sess2Reqs, err := r.ListBySession(ctx, "sess-2")
@@ -153,6 +153,6 @@ func TestRequestListBySession(t *testing.T) {
 		t.Fatalf("expected 1 request for sess-2, got %d", len(sess2Reqs))
 	}
 	if sess2Reqs[0].ID != "r3" {
-		t.Errorf("got request ID %q, want r3", sess2Reqs[0].ID)
+		t.Errorf("expected first request for sess-2 to be r3, got %s", sess2Reqs[0].ID)
 	}
 }

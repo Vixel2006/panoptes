@@ -1,6 +1,9 @@
 package db
 
-import "fmt"
+import (
+	"database/sql"
+	"fmt"
+)
 
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS sessions (
@@ -49,26 +52,28 @@ var migrations = []string{
 	)`,
 }
 
-func (d *DB) migrate() error {
+func Migrate(db *sql.DB) error {
 	for i, m := range migrations {
-		if _, err := d.Exec(m); err != nil {
+		if _, err := db.Exec(m); err != nil {
 			return fmt.Errorf("migration %d: %w", i, err)
 		}
 	}
 
-	// Ensure name column exists in groups table
 	var groupNameCount int
-	err := d.QueryRow("SELECT count(*) FROM pragma_table_info('groups') WHERE name='name'").Scan(&groupNameCount)
+	err := db.QueryRow("SELECT count(*) FROM pragma_table_info('groups') WHERE name='name'").Scan(&groupNameCount)
 	if err == nil && groupNameCount == 0 {
-		_, _ = d.Exec("ALTER TABLE groups ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+		_, _ = db.Exec("ALTER TABLE groups ADD COLUMN name TEXT NOT NULL DEFAULT ''")
 	}
 
-	// Ensure session_id column exists in requests table
 	var count int
-	err = d.QueryRow("SELECT count(*) FROM pragma_table_info('requests') WHERE name='session_id'").Scan(&count)
+	err = db.QueryRow("SELECT count(*) FROM pragma_table_info('requests') WHERE name='session_id'").Scan(&count)
 	if err == nil && count == 0 {
-		_, _ = d.Exec("ALTER TABLE requests ADD COLUMN session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE")
+		_, _ = db.Exec("ALTER TABLE requests ADD COLUMN session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE")
 	}
 
 	return nil
+}
+
+func (d *DB) migrate() error {
+	return Migrate(d.DB)
 }

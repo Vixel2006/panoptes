@@ -13,17 +13,16 @@ import (
 
 	"github.com/Vixel2006/panoptes/internal/core/models"
 	"github.com/Vixel2006/panoptes/internal/core/ports"
-
-	cert "github.com/Vixel2006/panoptes/internal/infra/tls"
 )
 
 type InterceptAdapter struct {
-	certGen     *cert.CertificateGenerator
-	barrier     port.BarrierPort
-	interceptor port.InterceptorPort
+	certGen      port.CertificateIssuer
+	barrier      port.BarrierPort
+	interceptor  port.InterceptorPort
 	decompressor port.Decompressor
-	idGen       port.IDGenerator
-	requestCh   chan model.Request
+	idGen        port.IDGenerator
+	forwarder    port.HTTPForwarder
+	requestCh    chan model.Request
 }
 
 type bufferedConn struct {
@@ -34,11 +33,12 @@ type bufferedConn struct {
 func (bc *bufferedConn) Read(b []byte) (int, error) { return bc.r.Read(b) }
 
 func NewInterceptAdapter(
-	certGen *cert.CertificateGenerator,
+	certGen port.CertificateIssuer,
 	barrier port.BarrierPort,
 	interceptor port.InterceptorPort,
 	decompressor port.Decompressor,
 	idGen port.IDGenerator,
+	forwarder port.HTTPForwarder,
 	requestCh chan model.Request,
 ) *InterceptAdapter {
 	return &InterceptAdapter{
@@ -47,6 +47,7 @@ func NewInterceptAdapter(
 		interceptor:  interceptor,
 		decompressor: decompressor,
 		idGen:        idGen,
+		forwarder:    forwarder,
 		requestCh:    requestCh,
 	}
 }
@@ -107,6 +108,42 @@ func (i *InterceptAdapter) buildResponse(r *http.Response) model.Response {
 		Payload:    json.RawMessage(storedBody),
 		Length:     r.ContentLength,
 	}
+}
+
+// InterceptRoundTrip runs the full interception pipeline for a single request:
+// build model, intercept, check barrier, forward, build response, intercept response.
+// It writes the final HTTP response to w.
+func (i *InterceptAdapter) InterceptRoundTrip(req *http.Request, w io.Writer) error {
+	modelReq := i.buildRequest(req)
+	i.interceptor.InterceptRequest(modelReq)
+
+	i.barrier.Lock()
+	forward := i.barrier.Decision()
+	i.barrier.Unlock()
+
+	if !forward {
+		dropResp := &http.Response{
+			StatusCode: http.StatusForbidden,
+			ProtoMajor: 1,
+			ProtoMinor: 1,
+		}
+		return dropResp.Write(w)
+	}
+
+	upstreamResp, err := i.forwarder.RoundTrip(req)
+	if err != nil {
+		errResp := &http.Response{
+			StatusCode: http.StatusBadGateway,
+			ProtoMajor: 1,
+			ProtoMinor: 1,
+		}
+		return errResp.Write(w)
+	}
+	defer upstreamResp.Body.Close()
+
+	modelResp := i.buildResponse(upstreamResp)
+	i.interceptor.InterceptResponse(modelResp, modelReq.ID)
+	return upstreamResp.Write(w)
 }
 
 func (i *InterceptAdapter) HandleConn(conn net.Conn) {
@@ -218,45 +255,14 @@ func (i *InterceptAdapter) handleTLS(conn net.Conn, br *bufio.Reader) {
 			req.URL.Host = req.Host
 		}
 
-		modelReq := i.buildRequest(req)
-		i.interceptor.InterceptRequest(modelReq)
-		i.barrier.Lock()
-		forward := i.barrier.Decision()
-		i.barrier.Unlock()
-
-		if !forward {
-			dropResp := &http.Response{
-				StatusCode: http.StatusForbidden,
-				ProtoMajor: 1,
-				ProtoMinor: 1,
-			}
-			dropResp.Write(outer)
-			continue
+		if err := i.InterceptRoundTrip(req, outer); err != nil {
+			break
 		}
-
-		transport := &http.Transport{Proxy: nil}
-		upstreamResp, err := transport.RoundTrip(req)
-		if err != nil {
-			errResp := &http.Response{
-				StatusCode: http.StatusBadGateway,
-				ProtoMajor: 1,
-				ProtoMinor: 1,
-			}
-			errResp.Write(outer)
-			continue
-		}
-		modelResp := i.buildResponse(upstreamResp)
-		i.interceptor.InterceptResponse(modelResp)
-		upstreamResp.Write(outer)
-		upstreamResp.Body.Close()
 	}
 }
 
 func (i *InterceptAdapter) interceptTLS(tlsConn net.Conn, host string) {
 	tlsBr := bufio.NewReader(tlsConn)
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
-	}
 	for {
 		req, err := http.ReadRequest(tlsBr)
 		if err != nil {
@@ -265,37 +271,9 @@ func (i *InterceptAdapter) interceptTLS(tlsConn net.Conn, host string) {
 		req.URL = &url.URL{Scheme: "https", Host: host, Path: req.RequestURI}
 		req.RequestURI = ""
 
-		modelReq := i.buildRequest(req)
-		i.interceptor.InterceptRequest(modelReq)
-
-		i.barrier.Lock()
-		forward := i.barrier.Decision()
-		i.barrier.Unlock()
-
-		if !forward {
-			dropResp := &http.Response{
-				StatusCode: http.StatusForbidden,
-				ProtoMajor: 1,
-				ProtoMinor: 1,
-			}
-			dropResp.Write(tlsConn)
-			continue
+		if err := i.InterceptRoundTrip(req, tlsConn); err != nil {
+			break
 		}
-
-		upstreamResp, err := transport.RoundTrip(req)
-		if err != nil {
-			errResp := &http.Response{
-				StatusCode: http.StatusBadGateway,
-				ProtoMajor: 1,
-				ProtoMinor: 1,
-			}
-			errResp.Write(tlsConn)
-			continue
-		}
-		modelResp := i.buildResponse(upstreamResp)
-		i.interceptor.InterceptResponse(modelResp)
-		upstreamResp.Write(tlsConn)
-		upstreamResp.Body.Close()
 	}
 }
 
@@ -310,37 +288,5 @@ func (i *InterceptAdapter) handleHTTP(conn net.Conn, br *bufio.Reader) {
 		req.URL.Host = req.Host
 	}
 
-	modelReq := i.buildRequest(req)
-	i.interceptor.InterceptRequest(modelReq)
-
-	i.barrier.Lock()
-	forward := i.barrier.Decision()
-	i.barrier.Unlock()
-
-	if !forward {
-		dropResp := &http.Response{
-			StatusCode: http.StatusForbidden,
-			ProtoMajor: 1,
-			ProtoMinor: 1,
-		}
-		dropResp.Write(conn)
-		return
-	}
-
-	transport := &http.Transport{Proxy: nil}
-	upstreamResp, err := transport.RoundTrip(req)
-	if err != nil {
-		errResp := &http.Response{
-			StatusCode: http.StatusBadGateway,
-			ProtoMajor: 1,
-			ProtoMinor: 1,
-		}
-		errResp.Write(conn)
-		return
-	}
-	defer upstreamResp.Body.Close()
-
-	modelResp := i.buildResponse(upstreamResp)
-	i.interceptor.InterceptResponse(modelResp)
-	upstreamResp.Write(conn)
+	i.InterceptRoundTrip(req, conn)
 }

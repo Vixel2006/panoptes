@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Vixel2006/panoptes/internal/core/models"
@@ -11,13 +12,15 @@ import (
 
 type Interceptor struct {
 	requestCh chan<- model.Request
-	lastReqID string
 
 	persistReqCh  chan model.Request
 	persistRespCh chan model.Response
 	done          chan struct{}
 	workerWg      sync.WaitGroup
 	stopOnce      sync.Once
+
+	droppedReqs  atomic.Uint64
+	droppedResps atomic.Uint64
 
 	activeSessionID string
 	activeSessionMu sync.RWMutex
@@ -83,6 +86,7 @@ func (i *Interceptor) InterceptRequest(req model.Request) error {
 	select {
 	case i.persistReqCh <- req:
 	default:
+		i.droppedReqs.Add(1)
 	}
 
 	if i.requestCh != nil {
@@ -92,19 +96,18 @@ func (i *Interceptor) InterceptRequest(req model.Request) error {
 		}
 	}
 
-	i.lastReqID = req.ID
-
 	return nil
 }
 
-func (i *Interceptor) InterceptResponse(resp model.Response) error {
+func (i *Interceptor) InterceptResponse(resp model.Response, reqID string) error {
 	resp.CreatedAt = time.Now()
 	resp.UpdatedAt = time.Now()
-	resp.RequestID = i.lastReqID
+	resp.RequestID = reqID
 
 	select {
 	case i.persistRespCh <- resp:
 	default:
+		i.droppedResps.Add(1)
 	}
 
 	return nil
@@ -120,4 +123,11 @@ func (i *Interceptor) GetActiveSessionID() string {
 	i.activeSessionMu.RLock()
 	defer i.activeSessionMu.RUnlock()
 	return i.activeSessionID
+}
+
+func (i *Interceptor) Stats() port.InterceptorStats {
+	return port.InterceptorStats{
+		DroppedRequests:  i.droppedReqs.Load(),
+		DroppedResponses: i.droppedResps.Load(),
+	}
 }
